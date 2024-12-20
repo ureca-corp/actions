@@ -22,6 +22,10 @@ inputs:
     description: 'Deployment script to run'
     required: false
     default: 'deploy1.sh'
+  PRUNE:
+    description: 'Prune the old images'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -59,4 +63,14 @@ runs:
         if [ "$COMMAND_STATUS" != "Success" ]; then
           echo "Deployment failed with status: $COMMAND_STATUS"
           exit 1
+        fi
+
+        if [ "${{ inputs.PRUNE }}" == "true" ]; then
+          echo "Pruning old images..."
+          
+          aws ecr batch-delete-image \
+            --repository-name "${{ inputs.ECR }}" \
+            --image-ids imageTag=latest
+
+          docker image prune -a -f
         fi

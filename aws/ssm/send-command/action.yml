@@ -2,35 +2,26 @@ name: 'AWS SSM Deploy'
 description: 'Deploy to EC2 instance using AWS SSM with ECR image'
 
 inputs:
-  instance-id:
-    description: 'EC2 Instance ID'
+  EC2:
+    description: 'EC2 instance ID'
     required: true
-  working-directory:
-    description: 'Working directory on EC2'
-    required: true
-  script-name:
-    description: 'Script name to execute'
-    required: true
-  image-name:
+  IMAGE:
     description: 'Docker image name'
     required: true
-  ecr-url:
-    description: 'ECR Registry URL'
+  ECR:
+    description: 'ECR repository URL'
     required: true
-  port:
-    description: 'Port to expose'
+  PORT:
+    description: 'Port to run the container'
     required: true
-  aws-region:
-    description: 'AWS Region'
+  WORKDIR:
+    description: 'Working directory to run the deployment script'
     required: false
-    default: 'ap-northeast-2'
-  image-tag:
-    description: 'Docker image tag'
+    default: '/home/ec2-user/deploy'
+  SCRIPT:
+    description: 'Deployment script to run'
     required: false
-    default: 'latest'
-  container-name:
-    description: 'Custom container name'
-    required: false
+    default: 'deploy1.sh'
 
 runs:
   using: 'composite'
@@ -38,175 +29,34 @@ runs:
     - name: Deploy using AWS SSM
       shell: bash
       run: |
-        # 로깅 함수 정의
-        log_error() {
-          echo "❌ ERROR: $1"
-          # 에러 메시지를 파일에 저장
-          echo "[ERROR] $1" >> deployment_errors.log
-        }
-
-        log_warning() {
-          echo "⚠️ WARNING: $1"
-          # 경고 메시지를 파일에 저장
-          echo "[WARNING] $1" >> deployment_errors.log
-        }
-
-        # 에러 로그 파일 초기화
-        > deployment_errors.log
-
-        # AWS CLI 설치 확인
-        if ! command -v aws &> /dev/null; then
-          log_error "AWS CLI is not installed"
-          exit 1
-        fi
-
-        # jq 설치 확인
-        if ! command -v jq &> /dev/null; then
-          log_error "jq is not installed"
-          exit 1
-        fi
-
-        # 필수 파라미터로 스크립트 명령어 구성
-        SCRIPT_COMMAND="cd ${{ inputs.working-directory }} && ./${{ inputs.script-name }}"
-        SCRIPT_COMMAND+=" --image-name ${{ inputs.image-name }}"
-        SCRIPT_COMMAND+=" --ecr-url ${{ inputs.ecr-url }}"
-        SCRIPT_COMMAND+=" --port ${{ inputs.port }}"
-
-        # 선택적 파라미터 추가
-        if [ ! -z "${{ inputs.aws-region }}" ]; then
-            SCRIPT_COMMAND+=" --aws-region ${{ inputs.aws-region }}"
-        fi
-
-        if [ ! -z "${{ inputs.image-tag }}" ]; then
-            SCRIPT_COMMAND+=" --image-tag ${{ inputs.image-tag }}"
-        fi
-
-        if [ ! -z "${{ inputs.container-name }}" ]; then
-            SCRIPT_COMMAND+=" --container-name ${{ inputs.container-name }}"
-        fi
-
-        echo "📋 Deployment configuration:"
-        echo "- Instance ID: ${{ inputs.instance-id }}"
-        echo "- Working Directory: ${{ inputs.working-directory }}"
-        echo "- Image Name: ${{ inputs.image-name }}"
-        echo "- ECR URL: ${{ inputs.ecr-url }}"
-        echo "- Port: ${{ inputs.port }}"
-        echo "- AWS Region: ${{ inputs.aws-region }}"
-        echo "- Image Tag: ${{ inputs.image-tag }}"
-        echo "- Container Name: ${{ inputs.container-name }}"
-
-        echo "📦 Deployment command prepared: $SCRIPT_COMMAND"
-
-        # SSM 명령 실행
-        echo "🚀 Initiating deployment via AWS SSM..."
         COMMAND_ID=$(aws ssm send-command \
-          --targets "Key=InstanceIds,Values=${{ inputs.instance-id }}" \
+          --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters commands=["${SCRIPT_COMMAND}"] \
+          --parameters commands=["cd ${{ inputs.WORKDIR }} && chmod +x ${{ inputs.SCRIPT }} && ${{ inputs.SCRIPT }} \
+            --image-name ${{ inputs.IMAGE }} \
+            --ecr-url ${{ inputs.ECR }} \
+            --port ${{ inputs.PORT }} \
+            --aws-region ap-northeast-2 \
+            --image-tag latest
+          "] \
+          --comment "Deploy ${{ inputs.ECR }}" \
           --output text \
-          --query "Command.CommandId" 2>>deployment_errors.log)
+          --query "Command.CommandId")
 
-        if [ -z "$COMMAND_ID" ]; then
-            log_error "Failed to initiate SSM command. Check AWS credentials and instance status."
-            # AWS 관련 상태 확인
-            echo "🔍 Checking AWS Configuration..."
-            aws sts get-caller-identity 2>>deployment_errors.log || log_warning "AWS credentials might be invalid"
-            aws ec2 describe-instance-status --instance-ids ${{ inputs.instance-id }} 2>>deployment_errors.log || log_warning "Instance might be unavailable"
-            exit 1
-        fi
+        echo "Started deployment with command ID: $COMMAND_ID"
 
-        echo "🔑 Command ID: $COMMAND_ID"
-        echo "⏳ Waiting for deployment to complete..."
-
-        # SSM 명령 완료 대기 (타임아웃 300초)
-        TIMEOUT=300
-        ELAPSED=0
-        WAIT_INTERVAL=10
-
-        while [ $ELAPSED -lt $TIMEOUT ]; do
-            STATUS=$(aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "${{ inputs.instance-id }}" \
-                --query "Status" \
-                --output text 2>>deployment_errors.log || echo "Failed")
-            
-            if [ "$STATUS" = "Success" ]; then
-                break
-            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-                log_error "Command failed with status: $STATUS"
-                break
-            fi
-            
-            sleep $WAIT_INTERVAL
-            ELAPSED=$((ELAPSED + WAIT_INTERVAL))
-            echo "⏳ Still waiting... ($ELAPSED seconds elapsed)"
-        done
-
-        if [ $ELAPSED -ge $TIMEOUT ]; then
-            log_error "Deployment timed out after ${TIMEOUT} seconds"
-            exit 1
-        fi
-
-        # 명령 실행 결과 확인
-        echo "📊 Fetching deployment results..."
-        COMMAND_RESULT=$(aws ssm get-command-invocation \
+        echo "Waiting for command to complete..."
+        aws ssm wait command-executed \
           --command-id "$COMMAND_ID" \
-          --instance-id "${{ inputs.instance-id }}" \
-          --output json 2>>deployment_errors.log)
+          --instance-id "${{ inputs.EC2 }}"
 
-        if [ $? -ne 0 ]; then
-            log_error "Failed to fetch command results"
-            exit 1
-        fi
-
-        COMMAND_STATUS=$(echo $COMMAND_RESULT | jq -r '.Status')
-        COMMAND_OUTPUT=$(echo $COMMAND_RESULT | jq -r '.StandardOutputContent')
-        COMMAND_ERROR=$(echo $COMMAND_RESULT | jq -r '.StandardErrorContent')
-
-        echo "📊 Deployment Status: $COMMAND_STATUS"
-
-        # 도커 관련 일반적인 에러 메시지 패턴 확인
-        check_docker_errors() {
-            local error_content=$1
-            if echo "$error_content" | grep -q "pull access denied"; then
-                log_error "ECR authentication failed. Please check ECR permissions."
-            fi
-            if echo "$error_content" | grep -q "port is already allocated"; then
-                log_error "Port ${{ inputs.port }} is already in use on the instance."
-            fi
-            if echo "$error_content" | grep -q "no space left on device"; then
-                log_error "No disk space left on instance. Please clean up old images/containers."
-            fi
-        }
-
-        if [ ! -z "$COMMAND_OUTPUT" ]; then
-            echo "📝 Command Output:"
-            echo "$COMMAND_OUTPUT"
-        fi
+        COMMAND_STATUS=$(aws ssm get-command-invocation \
+          --command-id "$COMMAND_ID" \
+          --instance-id "${{ inputs.EC2 }}" \
+          --query "Status" \
+          --output text)
 
         if [ "$COMMAND_STATUS" != "Success" ]; then
-            echo "❌ Deployment failed"
-            if [ ! -z "$COMMAND_ERROR" ]; then
-                echo "🔴 Error Output:"
-                echo "$COMMAND_ERROR"
-                check_docker_errors "$COMMAND_ERROR"
-                
-                # 일반적인 문제 해결 방법 제시
-                echo -e "\n🔧 Troubleshooting suggestions:"
-                echo "1. Check if the ECR repository exists and you have proper permissions"
-                echo "2. Verify the instance has sufficient disk space: df -h"
-                echo "3. Check if Docker daemon is running: systemctl status docker"
-                echo "4. Verify network connectivity to ECR"
-                echo "5. Check instance IAM role permissions for ECR access"
-            fi
-            
-            # 전체 에러 로그 출력
-            if [ -s deployment_errors.log ]; then
-                echo -e "\n📑 Complete error log:"
-                cat deployment_errors.log
-            fi
-            
-            exit 1
+          echo "Deployment failed with status: $COMMAND_STATUS"
+          exit 1
         fi
-
-        echo "✅ Deployment completed successfully!"

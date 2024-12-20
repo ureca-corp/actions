@@ -64,7 +64,7 @@ runs:
         if ! command -v jq &> /dev/null; then
           log_error "jq is not installed"
           exit 1
-        }
+        fi
 
         # 필수 파라미터로 스크립트 명령어 구성
         SCRIPT_COMMAND="cd ${{ inputs.working-directory }} && ./${{ inputs.script-name }}"
@@ -91,18 +91,18 @@ runs:
         echo "- Image Name: ${{ inputs.image-name }}"
         echo "- ECR URL: ${{ inputs.ecr-url }}"
         echo "- Port: ${{ inputs.port }}"
-        echo "- AWS Region: ${AWS_REGION:-ap-northeast-2}"
-        echo "- Image Tag: ${IMAGE_TAG:-latest}"
-        echo "- Container Name: ${CONTAINER_NAME:-${{ inputs.image-name }}}"
+        echo "- AWS Region: ${{ inputs.aws-region }}"
+        echo "- Image Tag: ${{ inputs.image-tag }}"
+        echo "- Container Name: ${{ inputs.container-name }}"
 
         echo "📦 Deployment command prepared: $SCRIPT_COMMAND"
 
         # SSM 명령 실행
         echo "🚀 Initiating deployment via AWS SSM..."
         COMMAND_ID=$(aws ssm send-command \
-          --targets "Key=instanceids,Values=${{ inputs.instance-id }}" \
+          --targets "Key=InstanceIds,Values=${{ inputs.instance-id }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters commands=["$SCRIPT_COMMAND"] \
+          --parameters commands=["${SCRIPT_COMMAND}"] \
           --output text \
           --query "Command.CommandId" 2>>deployment_errors.log)
 

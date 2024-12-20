@@ -64,3 +64,15 @@ runs:
           echo "Deployment failed with status: $COMMAND_STATUS"
           exit 1
         fi
+
+        if [ "${{ inputs.PRUNE }}" == "true" ]; then
+          echo "Pruning old images..."
+
+          COMMAQND_ID=$(aws ssm send-command \
+            --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands=["docker image prune -a -f"] \
+            --comment "Prune Docker images from EC2 Instance ${{ inputs.EC2 }}" \
+            --output text \
+            --query "Command.CommandId")
+        fi

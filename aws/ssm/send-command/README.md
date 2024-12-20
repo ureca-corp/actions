@@ -1,85 +1,224 @@
-# AWS SSM Deployment Action Guide
+# ECR Docker 배포 스크립트 가이드
 
-## What's This All About?
-This GitHub Action automates deployments to EC2 instances using AWS Systems Manager (SSM).<br/>
-Instead of dealing with SSH connections, it provides a secure and efficient way to execute deployment scripts on your EC2 instances.<br/>
-It's designed to make your deployment process both secure and straightforward! 🚀
+# 목차
 
-## Main Features
-The deployment action handles these key tasks:
-- Executes scripts securely on EC2 instances without SSH
-- Provides real-time deployment status updates
-- Performs thorough validation of execution results
+1. [개요](#개요)
 
-## Input Parameters
-Here's what you'll need to get started:
+2. [주요 기능](#주요-기능)
 
-| Parameter         | Required | Description                              | Example             |
-| ----------------- | -------- | ---------------------------------------- | ------------------- |
-| instance-id       | Yes      | Your EC2 instance's unique identifier    | i-1234567890abcdef0 |
-| working-directory | Yes      | Target directory path on EC2 instance    | /home/ec2-user/app  |
-| script-name       | Yes      | Name of the deployment script to execute | deploy.sh           |
+3. [기본 사용법](#기본-사용법)
+  - [필수 파라미터만 사용](#1-필수-파라미터만-사용)
+  - [모든 파라미터 사용](#2-모든-파라미터-사용)
 
-## How It Works
-Let's walk through the process:
+4. [매개변수 설명](#매개변수-설명)
+  - [필수 매개변수](#필수-매개변수)
+  - [선택 매개변수](#선택-매개변수)
 
-1. **Command Initiation**
-  - Establishes connection through AWS SSM
-  - Transmits your script with specified parameters
-  - Generates a tracking ID for deployment monitoring
+5. [동작 프로세스](#동작-프로세스)
+  - [초기화](#1-초기화)
+  - [ECR 인증](#2-ecr-인증)
+  - [컨테이너 배포](#3-컨테이너-배포)
+  - [설정](#4-설정)
 
-2. **Execution Monitoring**
-  - Tracks deployment progress in real-time
-  - Maintains active status monitoring
-  - Provides progress updates throughout the process
+6. [실제 서비스별 예시](#실제-서비스별-예시)
+  - [Node.js 애플리케이션](#1-nodejs-애플리케이션)
+  - [Spring Boot 애플리케이션](#2-spring-boot-애플리케이션)
+  - [Nginx 웹 서버](#3-nginx-웹-서버)
 
-3. **Validation & Completion**
-  - Performs comprehensive execution validation
-  - Immediately notifies of any issues
-  - Confirms successful deployment completion
+7. [문제 해결 가이드](#문제-해결-가이드)
+  - [인증 실패 문제](#1-인증-실패-문제)
+    - [AWS 자격 증명 오류](#11-aws-자격-증명-오류)
+    - [ECR 저장소 권한 문제](#12-ecr-저장소-권한-문제)
 
----
+8. [참고 문서](#참고-문서)
 
-# AWS SSM 배포 액션 가이드
-
-## 소개
-이 GitHub Action은 AWS Systems Manager(SSM)를 활용하여 EC2 인스턴스 배포를 자동화합니다.<br/>
-SSH 연결 없이도 EC2 인스턴스에서 배포 스크립트를 안전하고 효율적으로 실행할 수 있습니다.<br/>
-배포 프로세스를 안전하고 간단하게 만들어드립니다! 🚀
+## 개요
+이 스크립트는 Amazon ECR(Elastic Container Registry)에서 Docker 컨테이너를 배포하는 프로세스를 자동화합니다.<br/>
+ECR 인증, 컨테이너 관리, 포트 매핑을 포함한 설정 가능한 매개변수를 통한 배포를 처리합니다. 🐳
 
 ## 주요 기능
-배포 액션은 다음과 같은 핵심 작업을 수행합니다:
-- SSH 없이 EC2 인스턴스에서 스크립트를 안전하게 실행
-- 실시간 배포 상태 업데이트 제공
-- 실행 결과에 대한 철저한 검증 수행
+- ECR 인증 및 이미지 가져오기
+- 자동 컨테이너 정리 및 재배포
+- 컨테이너 포트 매핑
+- 컨테이너 설정 커스터마이징
+- 오류 처리 및 상태 보고
 
-## 입력 파라미터
-시작하기 위해 필요한 정보입니다:
+## 기본 사용법
 
-| 파라미터          | 필수 여부 | 설명                              | 예시                |
-| ----------------- | --------- | --------------------------------- | ------------------- |
-| instance-id       | 예        | EC2 인스턴스의 고유 식별자        | i-1234567890abcdef0 |
-| working-directory | 예        | EC2 인스턴스의 대상 디렉토리 경로 | /home/ec2-user/app  |
-| script-name       | 예        | 실행할 배포 스크립트 이름         | deploy.sh           |
+### 1. 필수 파라미터만 사용
+```bash
+./deploy.sh \
+   --image-name my-application \
+   --ecr-url my-app.ecr.ap-northeast-2.amazonaws.com \
+   --port 3000
+```
 
-## 동작 방식
-프로세스를 단계별로 살펴보겠습니다:
+### 2. 모든 파라미터 사용
+```bash
+./deploy.sh \
+    --image-name my-application \
+    --ecr-url my-app.ecr.ap-northeast-2.amazonaws.com \
+    --port 3000 \
+    --aws-region ap-northeast-2 \
+    --image-tag v1.0.0 \
+    --container-name my-custom-container
+```
 
-1. **명령 초기화**
-  - AWS SSM을 통한 연결 수립
-  - 지정된 파라미터와 함께 스크립트 전송
-  - 배포 모니터링을 위한 추적 ID 생성
+## 매개변수 설명
 
-2. **실행 모니터링**
-  - 실시간 배포 진행 상황 추적
-  - 지속적인 상태 모니터링 유지
-  - 전체 프로세스 진행 상황 제공
+### 필수 매개변수
 
-3. **검증 및 완료**
-  - 종합적인 실행 검증 수행
-  - 문제 발생 시 즉각적인 알림
-  - 성공적인 배포 완료 확인
+| 매개변수   | 설명                 | 예시                                    |
+| ---------- | -------------------- | --------------------------------------- |
+| image-name | Docker 이미지 이름   | my-application                          |
+| ecr-url    | ECR 레지스트리 URL   | my-app.ecr.ap-northeast-2.amazonaws.com |
+| port       | 노출할 컨테이너 포트 | 3000                                    |
 
-## 더 자세한 정보
-AWS SSM CLI에 대한 자세한 내용은 다음 공식 문서를 참조하실 수 있습니다:  
-📚 https://docs.aws.amazon.com/cli/latest/reference/ssm/index.html
+### 선택 매개변수
+
+| 매개변수       | 설명               | 기본값             |
+| -------------- | ------------------ | ------------------ |
+| aws-region     | AWS 리전           | ap-northeast-2 (서울)     |
+| image-tag      | Docker 이미지 태그 | latest             |
+| container-name | 컨테이너 이름      | 이미지 이름과 동일 |
+
+## 동작 프로세스
+
+### 1. 초기화
+- 필수 매개변수 검증 (image-name, ecr-url, port)
+- 선택적 매개변수 기본값 설정
+- 컨테이너 이름 미지정 시 이미지 이름으로 설정
+
+### 2. ECR 인증
+- AWS 자격 증명을 사용하여 Amazon ECR 로그인
+- 지정된 ECR 저장소 접근 권한 확인
+- 인증 오류 발생 시 처리
+
+### 3. 컨테이너 배포
+스크립트는 다음 단계를 수행합니다:
+
+**이미지 관리**
+- ECR에서 지정된 Docker 이미지 가져오기
+- 다운로드 후 이미지 무결성 검증
+
+**컨테이너 수명주기**
+- 기존 컨테이너 확인
+- 기존 컨테이너 안전 중지 및 제거
+- 지정된 설정으로 새 컨테이너 배포
+
+### 4. 설정
+컨테이너는 다음과 같이 구성됩니다:
+- 사용자 지정 컨테이너 이름
+- 자동 재시작 정책
+- 호스트와 컨테이너 간 포트 매핑
+- 필수 Docker 런타임 설정
+
+## 실제 서비스별 예시
+### 1. Node.js 애플리케이션
+```bash
+./deploy.sh \
+    --image-name node-app \
+    --ecr-url 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com \
+    --port 3000 \
+    --image-tag latest
+```
+
+### 2. Spring Boot 애플리케이션
+```bash
+./deploy.sh \
+    --image-name spring-app \
+    --ecr-url 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com \
+    --port 8080 \
+    --image-tag latest
+```
+
+### 3. Nginx 웹 서버
+```bash
+./deploy.sh \
+    --image-name nginx-web \
+    --ecr-url 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com \
+    --port 80 \
+    --container-name web-server
+```
+
+## 문제 해결 가이드
+
+### 1. 인증 실패 문제
+
+#### 1.1 AWS 자격 증명 오류
+**증상**
+- `An error occurred (UnauthorizedOperation)` 메시지 발생
+- `Unable to locate credentials` 오류
+- ECR 로그인 시도 시 인증 실패
+
+**해결 방법**
+```bash
+# AWS 자격 증명 확인
+aws configure list
+
+# AWS 자격 증명 재설정
+aws configure
+
+# ECR 로그인 테스트
+aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URL}
+```
+
+#### 1.2 ECR 저장소 권한 문제
+**증상**
+- `Repository policy does not allow` 오류
+- `AccessDeniedException` 발생
+
+**해결 방법**
+1. IAM 사용자 정책 확인
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+2. ECR 저장소 정책 확인 및 수정
+```bash
+aws ecr get-repository-policy --repository-name ${IMAGE_NAME}
+```
+
+## 참고 문서
+
+### AWS 공식 문서
+- [Amazon ECR 사용 설명서](https://docs.aws.amazon.com/ko_kr/AmazonECR/latest/userguide/what-is-ecr.html)
+- [AWS CLI 설정 가이드](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
+- [AWS IAM 정책 설정](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html)
+- [ECR 리포지토리 정책 설정](https://docs.aws.amazon.com/AmazonECR/latest/userguide/repository-policies.html)
+
+### Docker 공식 문서
+- [Docker Run 레퍼런스](https://docs.docker.com/engine/reference/run/)
+- [Docker 네트워크 설정 가이드](https://docs.docker.com/config/containers/container-networking/)
+- [Docker 컨테이너 로깅](https://docs.docker.com/config/containers/logging/)
+- [Docker 볼륨 관리](https://docs.docker.com/storage/volumes/)
+- [Docker 보안 설정](https://docs.docker.com/engine/security/)
+
+### 모니터링 및 트러블슈팅
+- [Docker 디버깅 가이드](https://docs.docker.com/engine/reference/commandline/logs/)
+- [컨테이너 모니터링 도구](https://docs.docker.com/config/containers/resource_constraints/)
+- [Docker 성능 최적화](https://docs.docker.com/config/containers/resource_constraints/)
+
+### AWS 보안 관련
+- [ECR 보안 모범 사례](https://docs.aws.amazon.com/AmazonECR/latest/userguide/security-best-practices.html)
+- [AWS 자격 증명 관리](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html)
+- [VPC 엔드포인트 설정](https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints.html)
+
+### 추가 참고 자료
+- [ECR 할당량 및 제한](https://docs.aws.amazon.com/AmazonECR/latest/userguide/service-quotas.html)
+- [AWS CLI ECR 명령어 참조](https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ecr/index.html)
+- [Docker Compose 설정 가이드](https://docs.docker.com/compose/)

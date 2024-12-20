@@ -67,9 +67,9 @@ runs:
 
         if [ "${{ inputs.PRUNE }}" == "true" ]; then
           echo "Pruning old images..."
-          
+
           aws ecr batch-delete-image \
-            --repository-name "${{ inputs.ECR }}" \
+            --repository-name "${{ inputs.ECR }}/${{ inputs.IMAGE }}" \
             --image-ids imageTag=latest
 
           docker image prune -a -f

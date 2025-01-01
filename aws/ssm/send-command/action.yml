@@ -11,8 +11,11 @@ inputs:
   ECR:
     description: 'ECR repository URL'
     required: true
-  PORT:
+  HOST_PORT:
     description: 'Port to run the container'
+    required: true
+  CONTAINER_PORT:
+    description: 'Container port to run the container'
     required: true
   WORKDIR:
     description: 'Working directory to run the deployment script'
@@ -39,7 +42,8 @@ runs:
           --parameters commands=["cd ${{ inputs.WORKDIR }} && chmod +x ./${{ inputs.SCRIPT }} && ./${{ inputs.SCRIPT }} \
             --image-name ${{ inputs.IMAGE }} \
             --ecr-url ${{ inputs.ECR }} \
-            --port ${{ inputs.PORT }} \
+            --host-port ${{ inputs.HOST_PORT }} \
+            --container-port ${{ inputs.CONTAINER_PORT }} \
             --aws-region ap-northeast-2 \
             --image-tag latest
           "] \

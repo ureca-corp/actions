@@ -5,28 +5,23 @@ inputs:
   EC2:
     description: 'EC2 instance ID'
     required: true
-  IMAGE:
-    description: 'Docker image name'
+  SERVICE_NAME:
+    description: 'Service name in docker-compose'
     required: true
-  ECR:
-    description: 'ECR repository URL'
+  ECR_REGISTRY:
+    description: 'ECR registry URL'
     required: true
-  HOST_PORT:
-    description: 'Port to run the container'
-    required: true
-  CONTAINER_PORT:
-    description: 'Container port to run the container'
-    required: true
+    default: '211125563966.dkr.ecr.ap-northeast-2.amazonaws.com'
+  AWS_REGION:
+    description: 'AWS Region'
+    required: false
+    default: 'ap-northeast-2'
   WORKDIR:
-    description: 'Working directory to run the deployment script'
+    description: 'Working directory containing docker-compose.yml'
     required: false
     default: '/home/ec2-user/deploy'
-  SCRIPT:
-    description: 'Deployment script to run'
-    required: false
-    default: 'deploy1.sh'
   PRUNE:
-    description: 'Prune the old images'
+    description: 'Prune old images'
     required: false
     default: 'false'
 
@@ -36,24 +31,18 @@ runs:
     - name: Deploy using AWS SSM
       shell: bash
       run: |
+        # SSM 명령어 실행
         COMMAND_ID=$(aws ssm send-command \
           --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters commands=["cd ${{ inputs.WORKDIR }} && chmod +x ./${{ inputs.SCRIPT }} && ./${{ inputs.SCRIPT }} \
-            --image-name ${{ inputs.IMAGE }} \
-            --ecr-url ${{ inputs.ECR }} \
-            --host-port ${{ inputs.HOST_PORT }} \
-            --container-port ${{ inputs.CONTAINER_PORT }} \
-            --aws-region ap-northeast-2 \
-            --image-tag latest
-          "] \
-          --comment "Deploy ${{ inputs.ECR }}" \
+          --parameters commands=["cd ${{ inputs.WORKDIR }} && ./deploy.sh '${{ inputs.SERVICE_NAME }}' '${{ inputs.ECR_REGISTRY }}' '${{ inputs.AWS_REGION }}'"] \
+          --comment "Deploy ${{ inputs.SERVICE_NAME }}" \
           --output text \
           --query "Command.CommandId")
 
-        echo "배포 명령어 실행 ID: $COMMAND_ID"
+        echo "📝 배포 명령어 실행 ID: $COMMAND_ID"
 
-        echo "명령어 실행 완료 대기 중..."
+        echo "⏳ 명령어 실행 완료 대기 중..."
         aws ssm wait command-executed \
           --command-id "$COMMAND_ID" \
           --instance-id "${{ inputs.EC2 }}"
@@ -68,8 +57,8 @@ runs:
         # 상태별 로그 출력 및 처리
         case "$COMMAND_STATUS" in
           "Success")
-            echo "배포 성공"
-            echo "=== 배포 결과 로그 ==="
+            echo "✅ 배포 성공"
+            echo "📋 === 배포 결과 로그 ==="
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "${{ inputs.EC2 }}" \
@@ -78,8 +67,8 @@ runs:
             ;;
             
           "InProgress")
-            echo "배포 진행 중"
-            echo "=== 현재까지의 진행 로그 ==="
+            echo "⏳ 배포 진행 중"
+            echo "📋 === 현재까지의 진행 로그 ==="
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "${{ inputs.EC2 }}" \
@@ -88,18 +77,16 @@ runs:
             ;;
             
           "Failed")
-            echo "배포 실패"
-            echo "=== 상세 오류 로그 ==="
-            # 표준 에러 출력
-            echo "표준 에러:"
+            echo "❌ 배포 실패"
+            echo "⚠️ === 상세 오류 로그 ==="
+            echo "🔍 표준 에러:"
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "${{ inputs.EC2 }}" \
               --query "StandardErrorContent" \
               --output text
             
-            # 표준 출력도 함께 확인
-            echo "표준 출력:"
+            echo "📋 표준 출력:"
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "${{ inputs.EC2 }}" \
@@ -109,13 +96,13 @@ runs:
             ;;
             
           *)
-            echo "알 수 없는 상태: $COMMAND_STATUS"
+            echo "❓ 알 수 없는 상태: $COMMAND_STATUS"
             exit 1
             ;;
         esac
 
         if [ "${{ inputs.PRUNE }}" == "true" ]; then
-          echo "Pruning old images..."
+          echo "🧹 오래된 이미지 정리 중..."
 
           COMMAND_ID=$(aws ssm send-command \
             --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
@@ -125,7 +112,7 @@ runs:
             --output text \
             --query "Command.CommandId")
 
-          echo "명령어 실행 완료 대기 중..."
+          echo "🔍 명령어 실행 완료 대기 중..."
           aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
             --instance-id "${{ inputs.EC2 }}"
@@ -140,7 +127,8 @@ runs:
           # 상태별 로그 출력 및 처리
           case "$COMMAND_STATUS" in
             "Success")
-              echo "Docker 이미지 정리 성공"
+              echo "✅ Docker 이미지 정리 성공"
+              echo "📋 === 이미지 정리 결과 로그 ==="
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \
@@ -149,26 +137,23 @@ runs:
               ;;
               
             "Failed")
-              echo "Docker 이미지 정리 실패"
-              echo "=== 상세 오류 로그 ==="
-              # 표준 에러 출력
-              echo "표준 에러:"
+              echo "❌ Docker 이미지 정리 실패"
+              echo "⚠️ === 상세 오류 로그 ==="
+              echo "🔍 표준 에러:"
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \
                 --query "StandardErrorContent" \
                 --output text
               
-              # 표준 출력도 함께 확인
-              echo "표준 출력:"
+              echo "📋 표준 출력:"
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \
                 --query "StandardOutputContent" \
                 --output text
                 
-              # 응답 코드 확인
-              echo "응답 코드:"
+              echo "📝 응답 코드:"
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \
@@ -179,7 +164,7 @@ runs:
               ;;
               
             "InProgress")
-              echo "Docker 이미지 정리 진행 중..."
+              echo "🔄 Docker 이미지 정리 진행 중..."
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \
@@ -188,8 +173,8 @@ runs:
               ;;
               
             *)
-              echo "알 수 없는 상태: $COMMAND_STATUS"
-              echo "=== 오류 상세 정보 ==="
+              echo "❓ 알 수 없는 상태: $COMMAND_STATUS"
+              echo "⚠️ === 오류 상세 정보 ==="
               aws ssm get-command-invocation \
                 --command-id "$COMMAND_ID" \
                 --instance-id "${{ inputs.EC2 }}" \

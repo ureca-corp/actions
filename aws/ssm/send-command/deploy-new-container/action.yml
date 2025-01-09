@@ -35,7 +35,7 @@ runs:
         COMMAND_ID=$(aws ssm send-command \
           --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters commands=["cd ${{ inputs.WORKDIR }} && ./deploy.sh '${{ inputs.SERVICE_NAME }}' '${{ inputs.ECR_REGISTRY }}' '${{ inputs.AWS_REGION }}'"] \
+          --parameters commands=["cd ${{ inputs.WORKDIR }} && ./deploy.sh ${{ inputs.SERVICE_NAME }} ${{ inputs.ECR_REGISTRY }} ${{ inputs.AWS_REGION }}"] \
           --comment "Deploy ${{ inputs.SERVICE_NAME }}" \
           --output text \
           --query "Command.CommandId")

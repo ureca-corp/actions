@@ -1,0 +1,44 @@
+name: 'AWS SSM Docker Prune'
+description: 'EC2 인스턴스의 Docker 이미지를 정리합니다'
+
+inputs:
+  EC2:
+    description: 'EC2 인스턴스 ID'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Docker 이미지 정리
+      shell: bash
+      run: |
+        # Docker 이미지 정리 명령어 실행
+        COMMAND_ID=$(aws ssm send-command \
+          --targets "Key=instanceids,Values=${{ inputs.EC2 }}" \
+          --document-name "AWS-RunShellScript" \
+          --parameters commands=["docker image prune -a -f"] \
+          --comment "EC2 인스턴스 ${{ inputs.EC2 }}의 Docker 이미지 정리" \
+          --output text \
+          --query "Command.CommandId")
+
+        echo "Docker 이미지 정리 명령어 실행 ID: $COMMAND_ID"
+
+        # 명령어 완료 대기
+        echo "명령어 완료 대기 중..."
+        aws ssm wait command-executed \
+          --command-id "$COMMAND_ID" \
+          --instance-id "${{ inputs.EC2 }}"
+
+        # 명령어 실행 결과 확인
+        COMMAND_STATUS=$(aws ssm get-command-invocation \
+          --command-id "$COMMAND_ID" \
+          --instance-id "${{ inputs.EC2 }}" \
+          --query "Status" \
+          --output text)
+
+        if [ "$COMMAND_STATUS" != "Success" ]; then
+          echo "Docker 이미지 정리 실패. 상태: $COMMAND_STATUS"
+          exit 1
+        fi
+
+        echo "Docker 이미지 정리가 완료되었습니다."
